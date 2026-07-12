@@ -77,7 +77,7 @@ RAW chains, both-match priority case, x0 exclusion.
 **M3 — Load-use stall. ✅ (2026-07-11, `m3_loaduse` passes: 1-bubble stall for ALU/branch/address consumers, lw→sw stall-free via WB→MEM store-data forward, x0 + non-rs1/rs2 opcode exemptions)** Hazard unit stall logic. Tests: lw followed immediately by
 use; lw→sw (store data can forward from MEM, no stall needed — good corner case).
 
-**M4 — Control flow, predict-not-taken.** Branches/jumps resolve in EX with flush.
+**M4 — Control flow, predict-not-taken. ✅ (2026-07-11, `m4_branch` passes: flush of both wrong-path slots, loop, back-to-back taken branches, call/return, branch in load-use shadow, flushed-ecall-must-not-halt)** Branches/jumps resolve in EX with flush.
 This is the correctness baseline before any predictor. Tests: taken/not-taken
 branches, JAL/JALR, branch in a load-use shadow.
 

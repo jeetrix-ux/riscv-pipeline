@@ -8,14 +8,13 @@
 //    Their output registers double as the IF/ID instruction register and
 //    the MEM/WB load-data register respectively, so neither is duplicated
 //    here.
-//  - Branches and jumps resolve in EX and redirect the fetch PC. There is
-//    no flush yet (arrives in M4), so the two wrong-path instructions
-//    fetched behind a taken branch/jump DO execute: software must pad
-//    2 NOPs after control flow.
-//  - Full forwarding (M2): EX/MEM->EX and MEM/WB->EX paths plus the
-//    regfile write-first bypass cover every RAW distance except a load's
-//    result consumed at distance 1 (load-use).
-//  - Load-use (M3): the hazard unit freezes PC + IF/ID for one cycle and
+//  - Control flow (predict-not-taken): branches and jumps resolve in EX;
+//    a redirect flushes the two younger wrong-path instructions (in ID
+//    and IF), a fixed 2-cycle taken penalty. No software padding rules.
+//  - Full forwarding: EX/MEM->EX and MEM/WB->EX paths plus the regfile
+//    write-first bypass cover every RAW distance except a load's result
+//    consumed at distance 1 (load-use).
+//  - Load-use: the hazard unit freezes PC + IF/ID for one cycle and
 //    bubbles ID/EX, turning the distance-1 consumer into a distance-2 one
 //    that the FWD_WB path serves. A store's rs2 is exempt: store data is
 //    consumed in MEM, where a WB->MEM forward delivers a distance-1 load
@@ -46,11 +45,15 @@ module core_top (
 );
 
     // ------------------------------------------------------------------
-    // Hazard controls (stall/bubble driven by hazard_unit, bottom of file)
+    // Hazard controls
+    //
+    // stall/bubble come from hazard_unit (bottom of file); the flushes
+    // are assigned in EX where the redirect is computed. Stall and flush
+    // are mutually exclusive by construction: a stall needs a load in EX,
+    // a flush needs a branch/jump in EX.
     // ------------------------------------------------------------------
     wire stall_f, stall_d, bubble_x;
-    wire flush_d  = 1'b0;   // TODO(M4): kill wrong-path instr in IF/ID
-    wire flush_x  = 1'b0;   // TODO(M4): kill wrong-path instr in ID/EX
+    wire flush_d, flush_x;
 
     // ------------------------------------------------------------------
     // IF
@@ -82,9 +85,12 @@ module core_top (
         if (rst) begin
             pc_d    <= 32'h0;
             valid_d <= 1'b0;
+        end else if (flush_d) begin      // flush beats stall (they can't
+            pc_d    <= pc_f;             // coincide, but priority is explicit)
+            valid_d <= 1'b0;
         end else if (!stall_d) begin
             pc_d    <= pc_f;
-            valid_d <= !flush_d;
+            valid_d <= 1'b1;
         end
     end
 
@@ -161,6 +167,8 @@ module core_top (
     reg [1:0]  a_sel_x;
     reg        b_sel_x;
 
+    wire kill_x = bubble_x || flush_x;   // slot entering EX is dead
+
     always @(posedge clk) begin
         if (rst) begin
             valid_x     <= 1'b0;
@@ -184,17 +192,17 @@ module core_top (
             rd_x        <= 5'd0;
             funct3_x    <= 3'd0;
         end else begin
-            // on a bubble the action bits are cleared too, not just valid,
-            // so a stalled load never looks like a producer to the
-            // hazard/forward units
-            valid_x     <= valid_d && !bubble_x && !flush_x && !is_illegal_d;
-            reg_write_x <= reg_write_d && !bubble_x;
-            mem_read_x  <= mem_read_d  && !bubble_x;
-            mem_write_x <= mem_write_d && !bubble_x;
-            is_branch_x <= is_branch_d && !bubble_x;
-            is_jal_x    <= is_jal_d    && !bubble_x;
-            is_jalr_x   <= is_jalr_d   && !bubble_x;
-            is_halt_x   <= is_halt_d   && !bubble_x;
+            // on a kill the action bits are cleared too, not just valid,
+            // so a bubbled/flushed slot never looks like a producer, a
+            // memory op, or a branch to the hazard/forward/redirect logic
+            valid_x     <= valid_d && !kill_x && !is_illegal_d;
+            reg_write_x <= reg_write_d && !kill_x;
+            mem_read_x  <= mem_read_d  && !kill_x;
+            mem_write_x <= mem_write_d && !kill_x;
+            is_branch_x <= is_branch_d && !kill_x;
+            is_jal_x    <= is_jal_d    && !kill_x;
+            is_jalr_x   <= is_jalr_d   && !kill_x;
+            is_halt_x   <= is_halt_d   && !kill_x;
             wb_sel_x    <= wb_sel_d;
             alu_op_x    <= alu_op_d;
             a_sel_x     <= a_sel_d;
@@ -214,7 +222,7 @@ module core_top (
     // EX
     // ------------------------------------------------------------------
 
-    // ---- operand forwarding (M2) ----
+    // ---- operand forwarding ----
     // fwd selects and result_m/rf_wdata_w are driven further down, next
     // to the pipeline registers that produce them
     wire [1:0]  fwd_a_x, fwd_b_x;
@@ -269,6 +277,12 @@ module core_top (
                                            (is_branch_x && br_taken_x));
     assign redirect_target_x = is_jalr_x ? jalr_target_x : pc_plus_imm_x;
 
+    // Mispredict flush: under predict-not-taken, any redirect means the
+    // two younger instructions - one in ID, one arriving from IF - are
+    // wrong-path. Kill both; the redirected fetch lands 2 cycles later.
+    assign flush_d = redirect_x;
+    assign flush_x = redirect_x;
+
     // ------------------------------------------------------------------
     // EX/MEM
     // ------------------------------------------------------------------
@@ -310,7 +324,7 @@ module core_top (
     end
 
     // EX/MEM result as it will eventually be written back (never a load:
-    // the M3 hazard unit keeps load consumers out of EX at distance 1)
+    // the hazard unit keeps load consumers out of EX at distance 1)
     assign result_m = (wb_sel_m == `WB_PC4) ? pc4_m : alu_y_m;
 
     // ------------------------------------------------------------------
