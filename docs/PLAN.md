@@ -90,7 +90,7 @@ mispredict rate vs the M4 baseline — these numbers are your interview ammuniti
 class + a golden-model comparison (Python ISS executing the same hex, diffing
 retired register/memory writes). Run whole suite with one script.
 
-**M7 — Synthesis & timing.** Out-of-context synth of the core for xc7a100tcsg324-1.
+**M7 — Synthesis & timing. ✅ (2026-07-12, `02_synth_ooc.tcl`: meets 100 MHz with WNS +0.224 ns → Fmax ≈ 102 MHz; 1257 LUTs / 488 FFs / 0 BRAM / 0 DSP ≈ 2% of the part; critical path = WB forward → JALR/branch resolve in EX → front-end enables, 16 logic levels — exactly the predicted path)** Out-of-context synth of the core for xc7a100tcsg324-1.
 Initial clock target 50 MHz, then push toward 100 MHz; record critical path
 (expect: forwarding mux → ALU → branch compare → PC redirect). Utilization report.
 
@@ -99,9 +99,10 @@ perf-counter/program output, UART TX for prints. Demo program (e.g., fibonacci o
 sieve printing over UART, mispredict rate on the 7-seg). Full XDC from Digilent
 master file; bitstream on hardware.
 
-**M9 — Write-up.** `talking_points.md`: forwarding vs stalling tradeoff, EX vs MEM
+**M9 — Write-up. ✅ (2026-07-12, `talking_points.md` — every claim tied to a measured number from the perf counters or the synth reports)** `talking_points.md`: forwarding vs stalling tradeoff, EX vs MEM
 branch resolution, 2-bit vs gshare (with your measured data), timing results, what
-you'd do next (gshare, caches, RAS, M-extension).
+you'd do next (gshare, caches, RAS, M-extension). *(M8 board bring-up stays open
+until real hardware is on the desk; everything before it is board-independent.)*
 
 ---
 

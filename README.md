@@ -54,6 +54,13 @@ Every test is also executed by `sw/iss.py`, a small Python RV32I instruction-set
 python sw\asm.py sw\tests\m1_arith.s -o build\m1_arith.hex -l build\m1_arith.lst
 ```
 
+### Synthesis check
+```powershell
+# Out-of-context synthesis + timing/utilization reports (build/synth/)
+vivado -mode batch -source scripts/02_synth_ooc.tcl
+```
+The core meets the board's 100 MHz clock (WNS +0.22 ns, Fmax ≈ 102 MHz) at 1257 LUTs / 488 FFs — about 2% of the Artix-7.
+
 ## Target Board
 
 **Digilent Nexys A7-100T** — Xilinx Artix-7 `xc7a100tcsg324-1`, 100 MHz board clock
