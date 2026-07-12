@@ -42,6 +42,12 @@ Each test in `sw/tests/` pairs a `.s` program with a `.exp` file holding the exp
 
 To simulate from the Vivado GUI instead: `vivado -mode batch -source scripts/01_create_project.tcl` creates the project, then assemble a test with `sw/asm.py`, copy the `.hex`/`.exp` files into the xsim run directory as `program.hex`/`expected.hex`, and launch behavioral simulation on `tb_core_top`.
 
+### Full regression (golden-model checked)
+```powershell
+powershell -File scripts\run_all.ps1
+```
+Every test is also executed by `sw/iss.py`, a small Python RV32I instruction-set simulator, and the RTL's final state is checked against the ISS word-for-word — so the hardware is verified against an independent model, not just hand-written expectations.
+
 ### Writing Tests
 ```powershell
 # Assemble standalone (Python 3 only, no other dependencies)

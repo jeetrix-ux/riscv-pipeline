@@ -86,7 +86,7 @@ program (predictor should approach ~loop-count/(loop-count+1) accuracy), alterna
 branch (worst case for 2-bit), BTB aliasing case. Measure and record CPI +
 mispredict rate vs the M4 baseline — these numbers are your interview ammunition.
 
-**M6 — Verification pass.** Self-checking regression: directed tests per instruction
+**M6 — Verification pass. ✅ (2026-07-12, `run_all.ps1`: 6/6 pass — `sw/iss.py` golden model cross-checked against every hand-written .exp, RTL checked against the ISS state with zero don't-cares; `m6_directed` adds blt/bge/bltu/bgeu, xori/ori, fence, sra/sltu sign traps)** Self-checking regression: directed tests per instruction
 class + a golden-model comparison (Python ISS executing the same hex, diffing
 retired register/memory writes). Run whole suite with one script.
 
