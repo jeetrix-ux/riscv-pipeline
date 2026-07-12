@@ -61,6 +61,13 @@ vivado -mode batch -source scripts/02_synth_ooc.tcl
 ```
 The core meets the board's 100 MHz clock (WNS +0.22 ns, Fmax ≈ 102 MHz) at 1257 LUTs / 488 FFs — about 2% of the Artix-7.
 
+### Board demo
+```powershell
+# Assemble the demo, synth/place/route, write build\soc\soc_top.bit
+vivado -mode batch -source scripts/03_build_bitstream.tcl
+```
+`soc_top` wraps the core with memory-mapped I/O and runs it at 50 MHz from an MMCM (the BRAM-to-branch-resolve path sets Fmax ≈ 82 MHz post-route). The demo program mirrors the switches onto the LEDs, computes `fib(switches[3:0])`, prints it over the USB-UART at 115200 (`fib(a)=00000037`), and shows the live branch/mispredict counters on the 7-seg display. `sim/tb_soc_top.v` boots the same demo in xsim and decodes the UART line to verify it before touching hardware.
+
 ## Target Board
 
 **Digilent Nexys A7-100T** — Xilinx Artix-7 `xc7a100tcsg324-1`, 100 MHz board clock

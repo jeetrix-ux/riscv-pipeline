@@ -45,7 +45,13 @@ module core_top (
     output wire        dmem_re,
     input  wire [31:0] dmem_rdata,
 
-    output reg         halted
+    output reg         halted,
+
+    // performance counters (memory-mapped by the SoC)
+    output reg  [31:0] perf_cycles,
+    output reg  [31:0] perf_instret,
+    output reg  [31:0] perf_ctrl,
+    output reg  [31:0] perf_mispred
 );
 
     // ------------------------------------------------------------------
@@ -511,10 +517,8 @@ module core_top (
     // cycles/instret give CPI; ctrl/mispred give predictor accuracy.
     // Every EX redirect is by definition a misprediction now, so
     // redirect_x is the mispredict count. Read hierarchically by the
-    // testbench; memory-mapped for software at board bring-up (M8).
+    // testbench and memory-mapped by soc_top for software.
     // ------------------------------------------------------------------
-    reg [31:0] perf_cycles, perf_instret, perf_ctrl, perf_mispred;
-
     always @(posedge clk) begin
         if (rst) begin
             perf_cycles  <= 32'h0;

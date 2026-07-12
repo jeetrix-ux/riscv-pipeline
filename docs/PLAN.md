@@ -94,15 +94,16 @@ retired register/memory writes). Run whole suite with one script.
 Initial clock target 50 MHz, then push toward 100 MHz; record critical path
 (expect: forwarding mux → ALU → branch compare → PC redirect). Utilization report.
 
-**M8 — Board bring-up.** SoC top with MMIO: switches in, LEDs out, 7-seg showing
+**M8 — Board bring-up. ✅ (2026-07-12, bitstream built and demo verified in simulation — flash `build/soc/soc_top.bit` when the board is on the desk. soc_top: MMIO map for LEDs/switches/7-seg/UART/perf counters, core at 50 MHz via MMCM after the full-SoC path (dmem BRAM → forward → branch resolve, 12 ns) capped Fmax at ~82 MHz; `tb_soc_top` decodes the UART and checks `fib(a)=00000037`)** SoC top with MMIO: switches in, LEDs out, 7-seg showing
 perf-counter/program output, UART TX for prints. Demo program (e.g., fibonacci or
 sieve printing over UART, mispredict rate on the 7-seg). Full XDC from Digilent
 master file; bitstream on hardware.
 
 **M9 — Write-up. ✅ (2026-07-12, `talking_points.md` — every claim tied to a measured number from the perf counters or the synth reports)** `talking_points.md`: forwarding vs stalling tradeoff, EX vs MEM
 branch resolution, 2-bit vs gshare (with your measured data), timing results, what
-you'd do next (gshare, caches, RAS, M-extension). *(M8 board bring-up stays open
-until real hardware is on the desk; everything before it is board-independent.)*
+you'd do next (gshare, caches, RAS, M-extension). *(Only physically flashing
+`soc_top.bit` and watching the LEDs blink remains — everything else is done and
+verified in simulation.)*
 
 ---
 

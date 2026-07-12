@@ -77,6 +77,22 @@ wrong-path instruction that escapes a flush lands a visible write.
   price of EX-stage branch resolution; the two levers if it ever fails
   timing are resolving in MEM (+1 cycle mispredict penalty) or predicting
   JALR targets with a RAS so the resolve path stops being urgent.
+- **The full SoC tells the honest version of that story**: once the dmem
+  is a real BRAM, its ~2.5 ns clock-to-out lands in front of the same
+  load-data → forward → branch-resolve chain and the post-route path is
+  12 ns (Fmax ≈ 82 MHz). The board therefore runs the core at **50 MHz
+  from an MMCM** with 8 ns of margin — the plan called this fallback
+  before implementation started. Knowing *which* path breaks first and
+  *why* the OOC number was optimistic is the actual takeaway.
+
+## The demo writes its own punchline
+
+The board demo maps the perf counters into the address space and puts
+{branches, mispredicts} on the 7-seg display. While the CPU spins in the
+UART busy-poll loop, the display shows tens of thousands of branches and a
+mispredict count you can read off in one glance — the 2-bit predictor eats
+a spin loop alive, live, in hardware. (`sim/tb_soc_top.v` verifies the same
+demo in simulation by decoding the UART waveform: `fib(a)=00000037`.)
 
 ## What I'd do next
 
