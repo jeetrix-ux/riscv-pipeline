@@ -1,0 +1,11 @@
+build/
+vivado_proj/
+*.jou
+*.log
+*.pb
+*.wdb
+*.str
+xsim.dir/
+.Xil/
+__pycache__/
+dfx_runtime.txt
