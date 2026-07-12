@@ -46,6 +46,11 @@
 `define WB_MEM      2'd1
 `define WB_PC4      2'd2
 
+// ---- EX-stage forwarding source ----
+`define FWD_NONE    2'd0
+`define FWD_MEM     2'd1
+`define FWD_WB      2'd2
+
 `define NOP_INSTR   32'h0000_0013   // addi x0, x0, 0
 
 `endif // RISCV_DEFS_VH

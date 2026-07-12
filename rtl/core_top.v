@@ -10,11 +10,12 @@
 //    here.
 //  - Branches and jumps resolve in EX and redirect the fetch PC. There is
 //    no flush yet (arrives in M4), so the two wrong-path instructions
-//    fetched behind a taken branch/jump DO execute: M1 software must pad
+//    fetched behind a taken branch/jump DO execute: software must pad
 //    2 NOPs after control flow.
-//  - No forwarding yet (M2) and no load-use stall yet (M3): dependent
-//    instructions must be at distance >= 3 (the regfile's write-first
-//    bypass covers producer-in-WB / consumer-in-ID).
+//  - Full forwarding (M2): EX/MEM->EX and MEM/WB->EX paths plus the
+//    regfile write-first bypass cover every RAW distance except a load's
+//    result consumed at distance 1 (load-use) - that still requires one
+//    intervening instruction until the M3 stall lands.
 //  - ecall/ebreak assert `halted` on reaching WB; all architectural
 //    writes are suppressed once halted.
 //////////////////////////////////////////////////////////////////////////////
@@ -41,7 +42,7 @@ module core_top (
 );
 
     // ------------------------------------------------------------------
-    // Hazard-control hooks (tied off until M2-M4)
+    // Hazard-control hooks (tied off until M3-M4)
     // ------------------------------------------------------------------
     wire stall_f  = 1'b0;   // TODO(M3): freeze PC on load-use hazard
     wire stall_d  = 1'b0;   // TODO(M3): freeze IF/ID on load-use hazard
@@ -202,16 +203,37 @@ module core_top (
     // ------------------------------------------------------------------
     // EX
     // ------------------------------------------------------------------
+
+    // ---- operand forwarding (M2) ----
+    // fwd selects and result_m/rf_wdata_w are driven further down, next
+    // to the pipeline registers that produce them
+    wire [1:0]  fwd_a_x, fwd_b_x;
+    wire [31:0] result_m;        // EX/MEM result as it will be written back
+    reg  [31:0] rs1_fwd_x, rs2_fwd_x;
+
+    always @* begin
+        case (fwd_a_x)
+            `FWD_MEM: rs1_fwd_x = result_m;
+            `FWD_WB:  rs1_fwd_x = rf_wdata_w;
+            default:  rs1_fwd_x = rs1_data_x;
+        endcase
+        case (fwd_b_x)
+            `FWD_MEM: rs2_fwd_x = result_m;
+            `FWD_WB:  rs2_fwd_x = rf_wdata_w;
+            default:  rs2_fwd_x = rs2_data_x;
+        endcase
+    end
+
     reg  [31:0] alu_a_x, alu_b_x;
     wire [31:0] alu_y_x;
 
     always @* begin
         case (a_sel_x)
-            `A_RS1:  alu_a_x = rs1_data_x;
+            `A_RS1:  alu_a_x = rs1_fwd_x;
             `A_PC:   alu_a_x = pc_x;
             default: alu_a_x = 32'h0;      // A_ZERO (LUI)
         endcase
-        alu_b_x = (b_sel_x == `B_IMM) ? imm_x : rs2_data_x;
+        alu_b_x = (b_sel_x == `B_IMM) ? imm_x : rs2_fwd_x;
     end
 
     alu u_alu (
@@ -224,13 +246,13 @@ module core_top (
     wire br_taken_x;
     branch_unit u_branch_unit (
         .funct3 (funct3_x),
-        .a      (rs1_data_x),
-        .b      (rs2_data_x),
+        .a      (rs1_fwd_x),
+        .b      (rs2_fwd_x),
         .taken  (br_taken_x)
     );
 
     wire [31:0] pc_plus_imm_x = pc_x + imm_x;                       // branch/JAL target
-    wire [31:0] jalr_target_x = (rs1_data_x + imm_x) & 32'hFFFF_FFFE;
+    wire [31:0] jalr_target_x = (rs1_fwd_x + imm_x) & 32'hFFFF_FFFE;
     wire [31:0] pc4_x         = pc_x + 32'd4;
 
     assign redirect_x        = valid_x && (is_jal_x || is_jalr_x ||
@@ -268,12 +290,16 @@ module core_top (
             is_halt_m    <= is_halt_x;
             wb_sel_m     <= wb_sel_x;
             alu_y_m      <= alu_y_x;
-            store_data_m <= rs2_data_x;
+            store_data_m <= rs2_fwd_x;   // store data is an EX consumer too
             pc4_m        <= pc4_x;
             rd_m         <= rd_x;
             funct3_m     <= funct3_x;
         end
     end
+
+    // EX/MEM result as it will eventually be written back (never a load:
+    // the M3 hazard unit keeps load consumers out of EX at distance 1)
+    assign result_m = (wb_sel_m == `WB_PC4) ? pc4_m : alu_y_m;
 
     // ------------------------------------------------------------------
     // MEM
@@ -352,6 +378,22 @@ module core_top (
     end
 
     assign rf_we_w = reg_write_w && valid_w && !halted;
+
+    // ------------------------------------------------------------------
+    // Forwarding
+    // ------------------------------------------------------------------
+    forward_unit u_forward_unit (
+        .rs1_x       (rs1_x),
+        .rs2_x       (rs2_x),
+        .reg_write_m (reg_write_m),
+        .valid_m     (valid_m),
+        .rd_m        (rd_m),
+        .reg_write_w (reg_write_w),
+        .valid_w     (valid_w),
+        .rd_w        (rd_w),
+        .fwd_a       (fwd_a_x),
+        .fwd_b       (fwd_b_x)
+    );
 
     always @(posedge clk) begin
         if (rst)

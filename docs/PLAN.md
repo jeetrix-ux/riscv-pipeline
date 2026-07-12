@@ -71,7 +71,7 @@ needed), with option to switch to riscv-gnu-toolchain later.
 decode/execute, NOP-padded test programs only. Milestone test: arithmetic/logic/imm
 program produces correct regfile state.
 
-**M2 — Forwarding.** EX/MEM→EX and MEM/WB→EX + regfile bypass. Tests: back-to-back
+**M2 — Forwarding. ✅ (2026-07-10, `m2_forward` passes: EX/MEM + MEM/WB paths, priority, x0, store-data/branch/jalr operands)** EX/MEM→EX and MEM/WB→EX + regfile bypass. Tests: back-to-back
 RAW chains, both-match priority case, x0 exclusion.
 
 **M3 — Load-use stall.** Hazard unit stall logic. Tests: lw followed immediately by
