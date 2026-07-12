@@ -17,36 +17,6 @@ Hazards:  EX/MEM──►EX and MEM/WB──►EX forwarding (priority to younge
           branches resolve in EX: 2-cycle flush on redirect
 ```
 
-## Project Structure
-
-```
-riscv-pipeline/
-├── rtl/                     # Synthesisable Verilog modules
-│   ├── riscv_defs.vh        # Shared opcode / ALU-op / mux-select defines
-│   ├── core_top.v           # 5-stage pipeline datapath + pipeline registers
-│   ├── control.v            # RV32I instruction decoder
-│   ├── regfile.v            # 2R1W register file with write-first bypass
-│   ├── imm_gen.v            # I/S/B/U/J immediate generator
-│   ├── alu.v                # Arithmetic / logic / shift / compare unit
-│   ├── branch_unit.v        # Branch condition resolution
-│   ├── forward_unit.v       # EX/MEM and MEM/WB forwarding selects
-│   ├── hazard_unit.v        # Load-use stall detection
-│   ├── imem.v               # Instruction memory (Block RAM, sync read)
-│   └── dmem.v               # Data memory (Block RAM, byte-writeable)
-├── sim/                     # Simulation & testbenches
-│   └── tb_core_top.v        # Self-checking top-level testbench
-├── sw/                      # Software toolchain & test programs
-│   ├── asm.py               # Two-pass RV32I assembler (no toolchain needed)
-│   └── tests/               # Assembly tests + expected-state files (.s / .exp)
-├── constraints/             # FPGA constraints
-│   └── nexys_a7.xdc         # Nexys A7-100T pin assignments
-├── scripts/                 # Build & simulation tooling
-│   ├── 01_create_project.tcl # Vivado project creation
-│   └── run_sim.ps1          # Assemble a test and run it through xsim
-└── docs/                    # Planning & write-ups
-    └── PLAN.md              # Microarchitecture spec + milestone plan
-```
-
 ## Pipeline Hazard Handling
 
 | Hazard | Mechanism | Cost |
@@ -59,16 +29,16 @@ riscv-pipeline/
 
 ## Quick Start
 
-### Simulation (Vivado xsim)
+The main output of this project is **simulation in Vivado (xsim)**: a test program runs on the pipelined core and the testbench checks the final register-file and memory state.
+
+### Run a simulation
 ```powershell
 # Assemble a test program and run it through the pipeline in xsim
 powershell -File scripts\run_sim.ps1 -Test m1_arith
 ```
-Each test in `sw/tests/` pairs a `.s` program with a `.exp` file holding the expected register-file and data-memory state; the testbench self-checks and prints `PASSED`/`FAILED`.
+Each test in `sw/tests/` pairs a `.s` program with a `.exp` file holding the expected register-file and data-memory state; the testbench self-checks and prints `PASSED`/`FAILED` plus the cycle count.
 
-### Synthesis
-1. `vivado -mode batch -source scripts/01_create_project.tcl` creates the project targeting `xc7a100tcsg324-1` (Nexys A7-100T).
-2. Run Synthesis → Implementation → Generate Bitstream from the project.
+To simulate from the Vivado GUI instead: `vivado -mode batch -source scripts/01_create_project.tcl` creates the project, then assemble a test with `sw/asm.py`, copy the `.hex`/`.exp` files into the xsim run directory as `program.hex`/`expected.hex`, and launch behavioral simulation on `tb_core_top`.
 
 ### Writing Tests
 ```powershell

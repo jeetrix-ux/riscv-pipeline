@@ -1,0 +1,4 @@
+# keep the github language bar honest: this is a verilog project
+*.vh  linguist-language=Verilog
+*.s   linguist-detectable=false
+*.ps1 linguist-detectable=false
