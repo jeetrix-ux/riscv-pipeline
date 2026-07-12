@@ -108,6 +108,10 @@ module tb_core_top;
 
         repeat (2) @(posedge clk);
         $display("halted after %0d cycles", cycles);
+        $display("perf: cycles=%0d instret=%0d CPIx100=%0d ctrl=%0d mispred=%0d",
+                 dut.perf_cycles, dut.perf_instret,
+                 (dut.perf_instret != 0) ? (dut.perf_cycles * 100) / dut.perf_instret : 0,
+                 dut.perf_ctrl, dut.perf_mispred);
 
         // an expected word containing x means "don't check"
         for (i = 0; i < 32; i = i + 1) begin

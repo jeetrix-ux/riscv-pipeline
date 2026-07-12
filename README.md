@@ -1,6 +1,6 @@
 # RISC-V Pipeline — 5-Stage Pipelined RV32I Core
 
-A 5-stage pipelined RISC-V (RV32I) processor core written in plain Verilog, targeting the **Digilent Nexys A7-100T** (Artix-7) FPGA. The core implements the classic IF/ID/EX/MEM/WB pipeline with full data-hazard forwarding, a one-bubble load-use stall, and branch resolution in EX with misprediction flush — with a BTB + 2-bit bimodal branch predictor and memory-mapped performance counters as the end goal.
+A 5-stage pipelined RISC-V (RV32I) processor core written in plain Verilog, targeting the **Digilent Nexys A7-100T** (Artix-7) FPGA. The core implements the classic IF/ID/EX/MEM/WB pipeline with full data-hazard forwarding, a one-bubble load-use stall, a BTB + 2-bit bimodal branch predictor steering the fetch stage (branches verify in EX and flush only on a mispredict), and performance counters for measuring CPI and predictor accuracy. On the loop-heavy benchmark the predictor cuts CPI from 1.77 to 1.27.
 
 ## Architecture
 
@@ -14,7 +14,8 @@ IMEM   regfile branch (BRAM)  write
 Hazards:  EX/MEM──►EX and MEM/WB──►EX forwarding (priority to younger)
           WB──►ID write-first regfile bypass
           load-use: 1-bubble stall (store data exempt via WB──►MEM forward)
-          branches resolve in EX: 2-cycle flush on redirect
+          control:  BTB + 2-bit bimodal predictor picks the fetch PC,
+                    EX verifies: 2-cycle flush only on a mispredict
 ```
 
 ## Pipeline Hazard Handling
@@ -25,7 +26,8 @@ Hazards:  EX/MEM──►EX and MEM/WB──►EX forwarding (priority to younge
 | RAW at register read | Write-first bypass inside the regfile | 0 cycles |
 | Load-use (ALU/branch/address consumer) | 1-bubble stall from the hazard unit | 1 cycle |
 | Load-use (store data) | WB→MEM store-data forward | 0 cycles |
-| Taken branch / jump | Flush IF/ID + ID/EX, redirect PC from EX | 2 cycles |
+| Correctly predicted branch / jump | BTB + 2-bit bimodal predictor in IF | 0 cycles |
+| Mispredicted branch / jump | Flush IF/ID + ID/EX, redirect PC from EX | 2 cycles |
 
 ## Quick Start
 

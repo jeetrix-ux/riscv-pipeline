@@ -8,9 +8,13 @@
 //    Their output registers double as the IF/ID instruction register and
 //    the MEM/WB load-data register respectively, so neither is duplicated
 //    here.
-//  - Control flow (predict-not-taken): branches and jumps resolve in EX;
-//    a redirect flushes the two younger wrong-path instructions (in ID
-//    and IF), a fixed 2-cycle taken penalty. No software padding rules.
+//  - Control flow: a BTB + 2-bit bimodal predictor steers the fetch PC.
+//    Branches and jumps still resolve in EX; only a MISprediction (wrong
+//    direction or wrong target) redirects and flushes the two younger
+//    wrong-path instructions, so a correctly predicted taken branch
+//    costs 0 cycles instead of the old fixed 2-cycle penalty.
+//  - Perf counters (cycles, retired instrs, control flow, mispredicts)
+//    let software and the testbench compute CPI and predictor accuracy.
 //  - Full forwarding: EX/MEM->EX and MEM/WB->EX paths plus the regfile
 //    write-first bypass cover every RAW distance except a load's result
 //    consumed at distance 1 (load-use).
@@ -62,12 +66,20 @@ module core_top (
     wire        redirect_x;
     wire [31:0] redirect_target_x;
 
-    wire [31:0] pc_next = redirect_x ? redirect_target_x : pc_f + 32'd4;
+    // predictor lookup for the PC being fetched (the instance lives in
+    // the EX section, next to the resolution logic that trains it)
+    wire        pred_taken_f;
+    wire [31:0] pred_target_f;
+
+    // an EX redirect (= detected misprediction) beats the IF prediction
+    wire [31:0] pc_next = redirect_x     ? redirect_target_x :
+                          pred_taken_f   ? pred_target_f     :
+                                           pc_f + 32'd4;
 
     always @(posedge clk) begin
         if (rst)
             pc_f <= 32'h0;
-        else if (!stall_f && !halted)
+        else if ((!stall_f || redirect_x) && !halted)   // flush beats stall
             pc_f <= pc_next;
     end
 
@@ -79,18 +91,25 @@ module core_top (
     // ------------------------------------------------------------------
     reg  [31:0] pc_d;
     reg         valid_d;
+    reg         pred_taken_d;            // what IF predicted for this slot,
+    reg  [31:0] pred_target_d;           // carried along for the EX check
     wire [31:0] instr_d = imem_rdata;
 
     always @(posedge clk) begin
         if (rst) begin
-            pc_d    <= 32'h0;
-            valid_d <= 1'b0;
+            pc_d          <= 32'h0;
+            valid_d       <= 1'b0;
+            pred_taken_d  <= 1'b0;
+            pred_target_d <= 32'h0;
         end else if (flush_d) begin      // flush beats stall (they can't
-            pc_d    <= pc_f;             // coincide, but priority is explicit)
-            valid_d <= 1'b0;
+            pc_d          <= pc_f;       // coincide, but priority is explicit)
+            valid_d       <= 1'b0;
+            pred_taken_d  <= 1'b0;
         end else if (!stall_d) begin
-            pc_d    <= pc_f;
-            valid_d <= 1'b1;
+            pc_d          <= pc_f;
+            valid_d       <= 1'b1;
+            pred_taken_d  <= pred_taken_f;
+            pred_target_d <= pred_target_f;
         end
     end
 
@@ -162,6 +181,8 @@ module core_top (
     reg        valid_x;
     reg        reg_write_x, mem_read_x, mem_write_x;
     reg        is_branch_x, is_jal_x, is_jalr_x, is_halt_x;
+    reg        pred_taken_x;
+    reg [31:0] pred_target_x;
     reg [1:0]  wb_sel_x;
     reg [3:0]  alu_op_x;
     reg [1:0]  a_sel_x;
@@ -179,6 +200,8 @@ module core_top (
             is_jal_x    <= 1'b0;
             is_jalr_x   <= 1'b0;
             is_halt_x   <= 1'b0;
+            pred_taken_x <= 1'b0;
+            pred_target_x <= 32'h0;
             wb_sel_x    <= `WB_ALU;
             alu_op_x    <= `ALU_ADD;
             a_sel_x     <= `A_RS1;
@@ -203,6 +226,8 @@ module core_top (
             is_jal_x    <= is_jal_d    && !kill_x;
             is_jalr_x   <= is_jalr_d   && !kill_x;
             is_halt_x   <= is_halt_d   && !kill_x;
+            pred_taken_x <= pred_taken_d && !kill_x;
+            pred_target_x <= pred_target_d;
             wb_sel_x    <= wb_sel_d;
             alu_op_x    <= alu_op_d;
             a_sel_x     <= a_sel_d;
@@ -273,15 +298,44 @@ module core_top (
     wire [31:0] jalr_target_x = (rs1_fwd_x + imm_x) & 32'hFFFF_FFFE;
     wire [31:0] pc4_x         = pc_x + 32'd4;
 
-    assign redirect_x        = valid_x && (is_jal_x || is_jalr_x ||
-                                           (is_branch_x && br_taken_x));
-    assign redirect_target_x = is_jalr_x ? jalr_target_x : pc_plus_imm_x;
+    // ---- prediction check ----
+    // The fetch already followed the IF prediction, so EX only redirects
+    // when that prediction was wrong: wrong direction, wrong target
+    // (JALR, or a stale BTB entry), or a BTB hit that predicted taken
+    // for something that is not control flow at all.
+    wire        is_ctrl_x       = is_branch_x || is_jal_x || is_jalr_x;
+    wire        actual_taken_x  = is_jal_x || is_jalr_x ||
+                                  (is_branch_x && br_taken_x);
+    wire [31:0] actual_target_x = is_jalr_x ? jalr_target_x : pc_plus_imm_x;
 
-    // Mispredict flush: under predict-not-taken, any redirect means the
-    // two younger instructions - one in ID, one arriving from IF - are
-    // wrong-path. Kill both; the redirected fetch lands 2 cycles later.
+    wire dir_wrong_x = actual_taken_x != pred_taken_x;
+    wire tgt_wrong_x = actual_taken_x && pred_taken_x &&
+                       (pred_target_x != actual_target_x);
+
+    assign redirect_x = valid_x &&
+                        ((is_ctrl_x && (dir_wrong_x || tgt_wrong_x)) ||
+                         (!is_ctrl_x && pred_taken_x));
+    assign redirect_target_x = actual_taken_x ? actual_target_x : pc4_x;
+
+    // Mispredict flush: a redirect means the two younger instructions -
+    // one in ID, one arriving from IF - are wrong-path. Kill both; the
+    // corrected fetch lands 2 cycles later.
     assign flush_d = redirect_x;
     assign flush_x = redirect_x;
+
+    // train the predictor on every resolved branch/jump
+    wire bp_update_x = valid_x && is_ctrl_x;
+
+    branch_predictor u_branch_predictor (
+        .clk           (clk),
+        .pc_f          (pc_f),
+        .pred_taken_f  (pred_taken_f),
+        .pred_target_f (pred_target_f),
+        .update_en     (bp_update_x),
+        .taken_u       (actual_taken_x),
+        .pc_u          (pc_x),
+        .target_u      (actual_target_x)
+    );
 
     // ------------------------------------------------------------------
     // EX/MEM
@@ -449,6 +503,30 @@ module core_top (
             halted <= 1'b0;
         else if (is_halt_w && valid_w)
             halted <= 1'b1;
+    end
+
+    // ------------------------------------------------------------------
+    // Performance counters
+    //
+    // cycles/instret give CPI; ctrl/mispred give predictor accuracy.
+    // Every EX redirect is by definition a misprediction now, so
+    // redirect_x is the mispredict count. Read hierarchically by the
+    // testbench; memory-mapped for software at board bring-up (M8).
+    // ------------------------------------------------------------------
+    reg [31:0] perf_cycles, perf_instret, perf_ctrl, perf_mispred;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            perf_cycles  <= 32'h0;
+            perf_instret <= 32'h0;
+            perf_ctrl    <= 32'h0;
+            perf_mispred <= 32'h0;
+        end else if (!halted) begin
+            perf_cycles <= perf_cycles + 32'd1;
+            if (valid_w)     perf_instret <= perf_instret + 32'd1;
+            if (bp_update_x) perf_ctrl    <= perf_ctrl    + 32'd1;
+            if (redirect_x)  perf_mispred <= perf_mispred + 32'd1;
+        end
     end
 
 endmodule

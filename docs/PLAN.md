@@ -81,7 +81,7 @@ use; lw→sw (store data can forward from MEM, no stall needed — good corner c
 This is the correctness baseline before any predictor. Tests: taken/not-taken
 branches, JAL/JALR, branch in a load-use shadow.
 
-**M5 — Branch predictor.** BTB + 2-bit counters + perf counters. Tests: loop-heavy
+**M5 — Branch predictor. ✅ (2026-07-12, `m5_loops`: 345 → 249 cycles vs predict-not-taken, CPI 1.77 → 1.27, 60/85 control transfers predicted right incl. the hostile alternating-branch phase; m1–m4 regressions pass)** BTB + 2-bit counters + perf counters. Tests: loop-heavy
 program (predictor should approach ~loop-count/(loop-count+1) accuracy), alternating
 branch (worst case for 2-bit), BTB aliasing case. Measure and record CPI +
 mispredict rate vs the M4 baseline — these numbers are your interview ammunition.
