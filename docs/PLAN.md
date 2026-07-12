@@ -74,7 +74,7 @@ program produces correct regfile state.
 **M2 — Forwarding. ✅ (2026-07-10, `m2_forward` passes: EX/MEM + MEM/WB paths, priority, x0, store-data/branch/jalr operands)** EX/MEM→EX and MEM/WB→EX + regfile bypass. Tests: back-to-back
 RAW chains, both-match priority case, x0 exclusion.
 
-**M3 — Load-use stall.** Hazard unit stall logic. Tests: lw followed immediately by
+**M3 — Load-use stall. ✅ (2026-07-11, `m3_loaduse` passes: 1-bubble stall for ALU/branch/address consumers, lw→sw stall-free via WB→MEM store-data forward, x0 + non-rs1/rs2 opcode exemptions)** Hazard unit stall logic. Tests: lw followed immediately by
 use; lw→sw (store data can forward from MEM, no stall needed — good corner case).
 
 **M4 — Control flow, predict-not-taken.** Branches/jumps resolve in EX with flush.

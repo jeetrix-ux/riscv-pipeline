@@ -14,8 +14,12 @@
 //    2 NOPs after control flow.
 //  - Full forwarding (M2): EX/MEM->EX and MEM/WB->EX paths plus the
 //    regfile write-first bypass cover every RAW distance except a load's
-//    result consumed at distance 1 (load-use) - that still requires one
-//    intervening instruction until the M3 stall lands.
+//    result consumed at distance 1 (load-use).
+//  - Load-use (M3): the hazard unit freezes PC + IF/ID for one cycle and
+//    bubbles ID/EX, turning the distance-1 consumer into a distance-2 one
+//    that the FWD_WB path serves. A store's rs2 is exempt: store data is
+//    consumed in MEM, where a WB->MEM forward delivers a distance-1 load
+//    result just in time (lw -> sw runs stall-free).
 //  - ecall/ebreak assert `halted` on reaching WB; all architectural
 //    writes are suppressed once halted.
 //////////////////////////////////////////////////////////////////////////////
@@ -42,11 +46,9 @@ module core_top (
 );
 
     // ------------------------------------------------------------------
-    // Hazard-control hooks (tied off until M3-M4)
+    // Hazard controls (stall/bubble driven by hazard_unit, bottom of file)
     // ------------------------------------------------------------------
-    wire stall_f  = 1'b0;   // TODO(M3): freeze PC on load-use hazard
-    wire stall_d  = 1'b0;   // TODO(M3): freeze IF/ID on load-use hazard
-    wire bubble_x = 1'b0;   // TODO(M3): inject bubble into ID/EX
+    wire stall_f, stall_d, bubble_x;
     wire flush_d  = 1'b0;   // TODO(M4): kill wrong-path instr in IF/ID
     wire flush_x  = 1'b0;   // TODO(M4): kill wrong-path instr in ID/EX
 
@@ -94,8 +96,10 @@ module core_top (
     wire [4:0] rd_d     = instr_d[11:7];
     wire [2:0] funct3_d = instr_d[14:12];
 
-    // writeback signals (driven in WB, used by the regfile write port)
+    // writeback signals (driven in WB; used by the regfile write port and
+    // the MEM-stage store-data forward, hence declared up here)
     wire        rf_we_w;
+    reg         reg_write_w, valid_w;
     reg  [4:0]  rd_w;
     reg  [31:0] rf_wdata_w;
 
@@ -119,6 +123,7 @@ module core_top (
 
     wire       reg_write_d, mem_read_d, mem_write_d;
     wire       is_branch_d, is_jal_d, is_jalr_d, is_halt_d, is_illegal_d;
+    wire       uses_rs1_d, uses_rs2_d;
     wire [1:0] wb_sel_d;
     wire [3:0] alu_op_d;
     wire [1:0] a_sel_d;
@@ -137,7 +142,9 @@ module core_top (
         .is_jal     (is_jal_d),
         .is_jalr    (is_jalr_d),
         .is_halt    (is_halt_d),
-        .is_illegal (is_illegal_d)
+        .is_illegal (is_illegal_d),
+        .uses_rs1   (uses_rs1_d),
+        .uses_rs2   (uses_rs2_d)
     );
 
     // ------------------------------------------------------------------
@@ -177,14 +184,17 @@ module core_top (
             rd_x        <= 5'd0;
             funct3_x    <= 3'd0;
         end else begin
+            // on a bubble the action bits are cleared too, not just valid,
+            // so a stalled load never looks like a producer to the
+            // hazard/forward units
             valid_x     <= valid_d && !bubble_x && !flush_x && !is_illegal_d;
-            reg_write_x <= reg_write_d;
-            mem_read_x  <= mem_read_d;
-            mem_write_x <= mem_write_d;
-            is_branch_x <= is_branch_d;
-            is_jal_x    <= is_jal_d;
-            is_jalr_x   <= is_jalr_d;
-            is_halt_x   <= is_halt_d;
+            reg_write_x <= reg_write_d && !bubble_x;
+            mem_read_x  <= mem_read_d  && !bubble_x;
+            mem_write_x <= mem_write_d && !bubble_x;
+            is_branch_x <= is_branch_d && !bubble_x;
+            is_jal_x    <= is_jal_d    && !bubble_x;
+            is_jalr_x   <= is_jalr_d   && !bubble_x;
+            is_halt_x   <= is_halt_d   && !bubble_x;
             wb_sel_x    <= wb_sel_d;
             alu_op_x    <= alu_op_d;
             a_sel_x     <= a_sel_d;
@@ -263,7 +273,7 @@ module core_top (
     // EX/MEM
     // ------------------------------------------------------------------
     reg [31:0] alu_y_m, store_data_m, pc4_m;
-    reg [4:0]  rd_m;
+    reg [4:0]  rd_m, rs2_m;       // rs2 kept for the WB->MEM store-data forward
     reg [2:0]  funct3_m;
     reg        valid_m;
     reg        reg_write_m, mem_read_m, mem_write_m, is_halt_m;
@@ -281,6 +291,7 @@ module core_top (
             store_data_m <= 32'h0;
             pc4_m        <= 32'h0;
             rd_m         <= 5'd0;
+            rs2_m        <= 5'd0;
             funct3_m     <= 3'd0;
         end else begin
             valid_m      <= valid_x;
@@ -293,6 +304,7 @@ module core_top (
             store_data_m <= rs2_fwd_x;   // store data is an EX consumer too
             pc4_m        <= pc4_x;
             rd_m         <= rd_x;
+            rs2_m        <= rs2_x;
             funct3_m     <= funct3_x;
         end
     end
@@ -314,8 +326,17 @@ module core_top (
         endcase
     end
 
+    // WB->MEM store-data forward: the instruction in WB is the youngest
+    // one older than this store, so if it writes the store's rs2 its
+    // value is architecturally the one to store. This is what lets a
+    // store consume a distance-1 load result without a stall (the hazard
+    // unit exempts store rs2 on the strength of this path).
+    wire [31:0] store_data_fwd_m =
+        (reg_write_w && valid_w && (rd_w != 5'd0) && (rd_w == rs2_m))
+            ? rf_wdata_w : store_data_m;
+
     assign dmem_addr  = alu_y_m;
-    assign dmem_wdata = store_data_m << (8 * alu_y_m[1:0]);
+    assign dmem_wdata = store_data_fwd_m << (8 * alu_y_m[1:0]);
     assign dmem_wstrb = (mem_write_m && valid_m && !halted) ? wstrb_m : 4'b0000;
     assign dmem_re    = mem_read_m && valid_m;
 
@@ -325,8 +346,7 @@ module core_top (
     reg [31:0] alu_y_w, pc4_w;
     reg [2:0]  funct3_w;
     reg [1:0]  addr_lo_w;
-    reg        valid_w;
-    reg        reg_write_w, is_halt_w;
+    reg        is_halt_w;
     reg [1:0]  wb_sel_w;
 
     always @(posedge clk) begin
@@ -380,8 +400,23 @@ module core_top (
     assign rf_we_w = reg_write_w && valid_w && !halted;
 
     // ------------------------------------------------------------------
-    // Forwarding
+    // Hazard detection and forwarding
     // ------------------------------------------------------------------
+    hazard_unit u_hazard_unit (
+        .valid_d    (valid_d),
+        .rs1_d      (rs1_d),
+        .rs2_d      (rs2_d),
+        .uses_rs1_d (uses_rs1_d),
+        .uses_rs2_d (uses_rs2_d),
+        .is_store_d (mem_write_d),
+        .valid_x    (valid_x),
+        .mem_read_x (mem_read_x),
+        .rd_x       (rd_x),
+        .stall_f    (stall_f),
+        .stall_d    (stall_d),
+        .bubble_x   (bubble_x)
+    );
+
     forward_unit u_forward_unit (
         .rs1_x       (rs1_x),
         .rs2_x       (rs2_x),

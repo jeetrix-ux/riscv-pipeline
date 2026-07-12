@@ -21,7 +21,9 @@ module control (
     output reg         is_jal,
     output reg         is_jalr,
     output reg         is_halt,
-    output reg         is_illegal
+    output reg         is_illegal,
+    output reg         uses_rs1,    // rs1 field is a real source (hazard detection)
+    output reg         uses_rs2     // rs2 field is a real source
 );
 
     wire [6:0] opc  = instr[6:0];
@@ -103,6 +105,21 @@ module control (
             default: begin
                 is_illegal = 1'b1;  // decodes as NOP
             end
+        endcase
+    end
+
+    // Which register fields are genuine sources. LUI/AUIPC/JAL carry
+    // immediate bits where rs1/rs2 would sit - without this, those bits
+    // could alias a load's rd and trigger a phantom load-use stall.
+    always @* begin
+        case (opc)
+            `OPC_OP,
+            `OPC_BRANCH,
+            `OPC_STORE: begin uses_rs1 = 1'b1; uses_rs2 = 1'b1; end
+            `OPC_OPIMM,
+            `OPC_LOAD,
+            `OPC_JALR:  begin uses_rs1 = 1'b1; uses_rs2 = 1'b0; end
+            default:    begin uses_rs1 = 1'b0; uses_rs2 = 1'b0; end
         endcase
     end
 
